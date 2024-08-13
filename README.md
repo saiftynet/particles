@@ -11,6 +11,11 @@ Pure Perl terminal based simulations simulations for particle motion
 
 [TODO] Define algorthms for different materials/surfaces
 
+### Boids
+
+
+### Game of life
+
 ## Fluids
 
 ### Diffusion
