@@ -1,6 +1,6 @@
 # Particles
 
-Pure Perl terminal based simulations simulations for particle motion
+Pure Perl terminal based simulations simulations for particle motion, cellular automata etc.  using ASCII characters and also methods using Braille Characters
 
 
 ### Sandfall
