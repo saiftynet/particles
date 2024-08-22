@@ -16,6 +16,10 @@ Pure Perl terminal based simulations simulations for particle motion
 
 ### Game of life
 
+
+
+![gol-braille](https://github.com/user-attachments/assets/97e77388-1472-43ed-8401-4591d7945f66)
+
 ## Fluids
 
 ### Diffusion
