@@ -12,6 +12,7 @@ Pure Perl terminal based simulations simulations for particle motion, cellular a
 [TODO] Define algorthms for different materials/surfaces
 
 ### Boids
+![boids-braille](https://github.com/user-attachments/assets/7bd60703-e1d3-4dee-9020-56906ff03379)
 
 
 ### Game of life
