@@ -1,362 +1,309 @@
-use strict; use warnings;
-binmode(STDOUT, ":encoding(UTF-8)");
+use strict;
+use warnings;
+binmode( STDOUT, ":encoding(UTF-8)" );
+
 #https://vanhunteradams.com/Pico/Animal_Movement/Boids-algorithm.html
 
-#my $world=new BoidWorld({maxX=>200,maxY=>200,maxZ=>200,minX=>0,minY=>0,minZ=>0,});
+#  Create a world
+my $world =  new BoidWorld( { maxX => 200, maxY => 130, minX => 10, minY => 10, } );
 
-my $world=new BoidWorld({maxX=>140,maxY=>100,minX=>0,minY=>0,});
+# populate with random entities;
+$world->randEntity() foreach ( 0 .. 200 ) ; 
 
-foreach (0..100){
-	$world->randEntity();
-}
-for (1..300){
-	$world->pass1();
-	$world->pass2();
-}
-package Vec;
-# Simple vector maths module that works with 2D or 3D Geometries
-
-sub Add{
-	my ($vecA,$vecB)=@_;
-	return [map{$vecA->[$_]+$vecB->[$_]}(0..$#$vecA)]
-}
-
-sub Sub{
-	my ($vecA,$vecB)=@_;
-	return [map{$vecA->[$_]-$vecB->[$_]}(0..$#$vecA)]
-}
-
-sub Sum{
-	my $sum=[];
-	foreach my $vec(@_){
-		foreach (0..$#$vec){
-			$sum->[$_]//=0;
-			$sum->[$_]+=$vec->[$_]
-		}
-	}
-	return $sum;
-}
-
-sub Mul{
-	my ($vec,$scale)=@_;
-	return [map{$vec->[$_]*$scale}(0..$#$vec)];
-}
-
-sub Div{
-	my ($vec,$scale)=@_;
-	return [map{$vec->[$_]/$scale}(0..$#$vec)];
-}
-
-sub Rand{
-	my ($max,$min)=@_;
-	$min//=[(0) x @$max];
-	return[map{int(rand()*($max->[$_]-$min->[$_])+$min->[$_])} (0..$#$max)]
-}
-
-sub Scalar{
-	my ($vector)=@_;
-	my $sumSquare=0;
-	$sumSquare+=$vector->[$_]*$vector->[$_] foreach  (0..$#$vector);
-	return sqrt $sumSquare;
-}
-
-sub Print{
-	my ($vector)=@_;
-	die caller unless ref $vector eq "ARRAY";
-	print Vec::toString($vector),"\n";
-}
-
-sub toString{
-	my ($vector)=@_;
-	die caller unless ref $vector eq "ARRAY";
-	return "[".join(",",map{sprintf ("%.2f",$_)}@$vector)."]";
+# watch them fly;
+for ( 1 .. 3000 ) {
+    $world->process();
+    $world->draw( 10, 10, 130, 200 );
 }
 
 package BoidWorld;
 
-	sub new{
-	   my ($class,$params)=@_;
-	   my $self={};
-	   $self->{bounds}=$params->{bounds}//{
+sub new {
+    my ( $class, $params ) = @_;
+    my $self = {};
+    # multiple ways of passing world geometry until we settle on the best way
+    # this is compatible with 2 or 3 (or more) dimensions.
+	$self->{bounds}=$params->{bounds}//{
 		   max=>$params->{max}?$params->{max}:[$params->{maxX},$params->{maxY},$params->{maxZ}?$params->{maxZ}:()],
 		   min=>$params->{min}?$params->{min}:[$params->{minX},$params->{minY},$params->{minZ}?$params->{maxZ}:()],
 		};
-		$self->{height}=$self->{bounds}->{max}->[1]-$self->{bounds}->{min}->[1];
-		$self->{width} =$self->{bounds}->{max}->[0]-$self->{bounds}->{min}->[0];
-		$self->{dim}=scalar  @{$self->{bounds}->{max}};
-		$self->{margin}=10;
-		print "Max bounds:-",join(",",@{$self->{bounds}->{max}}),"\n";
-		print "Min bounds:-",join(",",@{$self->{bounds}->{min}}),"\n";
-		$self->{grid}=[];
-		foreach (0..$self->{height}){
-		  vec($self->{grid}[$_],$self->{width},1)=0;
-		};
-	   $self->{entities}=[];
-	   bless $self,$class;
-	}
+    $self->{height} = $self->{bounds}->{max}->[1] - $self->{bounds}->{min}->[1];
+    $self->{width}  = $self->{bounds}->{max}->[0] - $self->{bounds}->{min}->[0];
+    $self->{dim}    = scalar @{ $self->{bounds}->{max} };  # number of dimensions of this world
+    $self->{margin} = 20;
+    # print "Max bounds:-", join( ",", @{ $self->{bounds}->{max} } ), "\n";
+    #  print "Min bounds:-", join( ",", @{ $self->{bounds}->{min} } ), "\n";
+    $self->{grid} = [];
 
-	sub insert{
-		my ($self,$entity)=@_;
-		push @{$self->{entities}},$entity;
-	}
-	
-	sub worldGrid{
-		my $self=shift;
-	}
+    foreach ( 0 .. $self->{height} ) {
+        vec( $self->{grid}[$_], $self->{width}, 1 ) = 0;
+    }
+    
+    # all interacting entitities, boids, future obstacles, e.g.
+    # predators/preys are stored in {entities};
+    
+    $self->{entities} = [];
+    bless $self, $class;
+}
 
+sub insert {
+    my ( $self, $entity ) = @_;
+    push @{ $self->{entities} }, $entity;
+}
 
-	sub draw{
-			my ($self,$windowX,$windowY,$height,$width)=@_;
-			my @block=();
-			for (my $row=$windowY;$row<$height-4;$row+=4){
-				my $r="";
-				for (my $column=$windowX;$column<$width;$column+=2){
-					$r.=$self->blockToBraille($column,$row);
-				}
-				push @block,$r;
-			}
-			#system($^O eq 'MSWin32'?'cls':'clear');
-			print "\e[2J\ec";
-			print join ("\n",@block);
-		
-	}
+sub draw {
+    my ( $self, $windowX, $windowY, $height, $width ) = @_;
+    my @block = ();  # the grid of braille characters
+    for ( my $row = $windowY ; $row < $height - 4 ; $row += 4 ) {
+        my $r = "";
+        for ( my $column = $windowX ; $column < $width ; $column += 2 ) {
+            $r .= $self->blockToBraille( $column, $row );
+        }
+        push @block, $r;
+    }
 
-	   
-	sub blockToBraille{
-		my ($self,$x,$y)=@_;
-		return chr(0x2800|oct("0b".join("",vec($self->{grid}->[$y+3],$x+1,1).vec($self->{grid}->[$y+3],$x,1).
-										   vec($self->{grid}->[$y+2],$x+1,1).vec($self->{grid}->[$y+1],$x+1,1).
-										   vec($self->{grid}->[$y],$x+1,1).vec($self->{grid}->[$y+2],$x,1).
-										   vec($self->{grid}->[$y+1],$x,1).vec($self->{grid}->[$y],$x,1) )));
-	}
+    system($^O eq 'MSWin32'?'cls':'clear');
+    #print "\e[2J\ec";
+    print join( "\n", @block );
+}
 
-	sub plot{
-		my($self,$vec) =@_;
-		vec($self->{grid}->[$vec->[1]],$vec->[0],1)=1;
-	}
+# the magic that converts a bit vector array into braille characters
+sub blockToBraille { 
+    my ( $self, $x, $y ) = @_;
+    return chr(0x2800 | oct(
+              "0b". vec( $self->{grid}->[ $y + 3 ], $x + 1, 1 )
+                  . vec( $self->{grid}->[ $y + 3 ], $x,     1 )
+                  . vec( $self->{grid}->[ $y + 2 ], $x + 1, 1 )
+                  . vec( $self->{grid}->[ $y + 1 ], $x + 1, 1 )
+                  . vec( $self->{grid}->[$y],       $x + 1, 1 )
+                  . vec( $self->{grid}->[ $y + 2 ], $x,     1 )
+                  . vec( $self->{grid}->[ $y + 1 ], $x,     1 )
+                  . vec( $self->{grid}->[$y],       $x,     1 ) 
+        )
+    );
+}
 
-	sub point{
-		my($self,$vec) =@_;
-		return vec($self->{grid}->[$vec->[1]],$vec->[0],1);
-	}
+sub plot {
+    my ( $self, $vec ) = @_;
+    return if outOfBounds($vec);
+    vec( $self->{grid}->[ $vec->[1] ], $vec->[0], 1 ) = 1;
+}
 
-	sub unplot{
-		my($self,$vec) =@_;
-		vec($self->{grid}->[$vec->[1]],$vec->[0],1)=0;
-	}
+sub point {
+    my ( $self, $vec ) = @_;
+    return if outOfBounds($vec);
+    return vec( $self->{grid}->[ $vec->[1] ], $vec->[0], 1 );
+}
 
+sub unplot {
+    my ( $self, $vec ) = @_;
+    return if outOfBounds($vec);
+    vec( $self->{grid}->[ $vec->[1] ], $vec->[0], 1 ) = 0;
+}
 
-	sub randEntity{
-		my ($self)=@_;
-		my $pos=Vec::Rand($self->{bounds}->{max},$self->{bounds}->{min});
-		my $vel=Vec::Rand([(5) x $self->{dim}]);
-		$self->insert(Boid->new ({pos=>$pos,vel=>$vel}));
-	}
+sub outOfBounds {
+    my ( $self, $vec ) = @_;
+    foreach ( 0 .. $#$vec ) {
+        return 1 if $vec->[$_] < $self->{bounds}->{min}->[$_];
+        return 2 if $vec->[$_] > $self->{bounds}->{max}->[$_];
+    }
+    return 0;
+}
 
+sub randEntity { # create random boids
+    my ($self) = @_;
+    my $pos = Vec::Rand( $self->{bounds}->{max}, $self->{bounds}->{min} );
+    my $vel = Vec::Rand( [ (3) x $self->{dim} ], [ (-3) x $self->{dim} ] );
+    $self->insert( Boid->new( { pos => $pos, vel => $vel } ) );
+}
 
-	sub pass1{
-		my $self=shift;
+sub process {
+    my $self = shift;
+    # two loops means that the pairs are not repeated 
+    foreach my $ind1 ( 0 .. $#{ $self->{entities} } ) {
+        foreach my $ind2 ( $ind1 + 1 .. $#{ $self->{entities} } ) {
+			# are boids near enough to affect each other?
+            my $proximity = ( ( $self->{entities}->[$ind1] )->closeBy( $self->{entities}->[$ind2] ) );
+            next unless $proximity;  # not close enough..get next pair;
+            if ( $proximity < $self->{entities}->[$ind1]->{protectedRange} ) {
+				# too close...add their **deltas** to {close};
+                $self->{entities}->[$ind1]->vecAccum( $self->{entities}->[$ind2], "pos", "close", 1 );
+                $self->{entities}->[$ind2]->vecAccum( $self->{entities}->[$ind1], "pos", "close", 1 );
+            }
+            else {
+				# within visual range but not in protected area, accumulate position and velocity vectors
+                $self->{entities}->[$ind1]->vecAccum( $self->{entities}->[$ind2], "pos", "accumPos" );
+                $self->{entities}->[$ind1]->vecAccum( $self->{entities}->[$ind2], "vel", "accumVel" );
+                $self->{entities}->[$ind2]->vecAccum( $self->{entities}->[$ind1], "pos", "accumPos" );
+                $self->{entities}->[$ind2]->vecAccum( $self->{entities}->[$ind1], "vel", "accumVel" );
+                # neighbours incremented;
+                $self->{entities}->[$ind1]->{neighbours}++;
+                $self->{entities}->[$ind2]->{neighbours}++;
+            }
 
-		foreach my $ind1(0..$#{$self->{entities}}){
-			foreach my $ind2($ind1+1..$#{$self->{entities}}){
-				my $proximity=(($self->{entities}->[$ind1])->closeBy ($self->{entities}->[$ind2]));
-				#print $ind1,"  ",Vec::toString($self->{entities}->[$ind1]->{accumPos}),"  ",Vec::toString($self->{entities}->[$ind1]->{accumVel}),"\n";
-				next unless $proximity;
-				#print $ind1,"  ",$ind2,"  ",$proximity," Coords  ";
-				#print join(",",@{$self->{entities}->[$ind1]->{pos}}),"  ",join(",",@{$self->{entities}->[$ind2]->{pos}}),"\n";
-				# print $ind1, " accumPos ",Vec::toString($self->{entities}->[$ind1]->{accumPos});
-				if ($proximity<$self->{entities}->[$ind1]->{protectedRange}){
-					$self->{entities}->[$ind1]->vecAccum($self->{entities}->[$ind2],"pos","close");
-					$self->{entities}->[$ind2]->vecAccum($self->{entities}->[$ind1],"pos","close");
-				}
-				else{
-					$self->{entities}->[$ind1]->vecAccum($self->{entities}->[$ind2],"pos","accumPos");
-					$self->{entities}->[$ind1]->vecAccum($self->{entities}->[$ind2],"vel","accumVel");
-					$self->{entities}->[$ind2]->vecAccum($self->{entities}->[$ind1],"pos","accumPos");
-					$self->{entities}->[$ind2]->vecAccum($self->{entities}->[$ind1],"vel","accumVel");
-				}
-				$self->{entities}->[$ind1]->{neighbours}++;
-				$self->{entities}->[$ind2]->{neighbours}++;
-				
-				#print "  ",Vec::toString($self->{entities}->[$ind1]->{accumPos}),"  ",Vec::toString($self->{entities}->[$ind1]->{accumVel}),"  ",$self->{entities}->[$ind1]->{neighbours},"\n" ;
-			}
-		}
-	}
-
-
-	sub pass2{
-		my $self=shift;
-		foreach my $ind(0..$#{$self->{entities}}){
-			$self->{entities}->[$ind]->update($self);;
-		}
-		$self->draw(0,0,100,140)
-	}
-	
-
+        }
+    }
+    # now update all the boids
+    foreach my $boid (@{ $self->{entities} } ) {
+		 # the world is passsed so that the boid object
+		 # is aware of geometry of the world it is in
+       $boid->update($self);
+    }
+}
 
 package Boid;
 
-sub new{
-   my ($class,$params)=@_;
-   my $self={};
-   $self->{pos}=$params->{position}//$params->{pos}//[$params->{x}//0,$params->{y}//0,$params->{z}//0,];
-   $self->{vel}=$params->{velocity}//$params->{vel}//[$params->{dx}//0,$params->{dy}//0,$params->{dz}//0,];
-   $self->{mass}=$params->{mass}//100;
-   $self->{visualRange}=$params->{visualRange}//20;
-   $self->{protectedRange}=$params->{protectedRange}//5;
-   $self->{turnFactor}=$params->{turnFactor}//2;
-   $self->{centeringFactor}=0.1;
-   $self->{matchingFactor}=0.1;
-   $self->{avoidFactor}=0;
-   bless $self,$class;
-   $self->resetCounts();
-   return $self;
+sub new {
+    my ( $class, $params ) = @_;
+    my $self = {};
+    $self->{pos} = $params->{position} // $params->{pos}// [ $params->{x} //0, $params->{y} //0, $params->{z}  // (), ];
+    $self->{vel} = $params->{velocity} // $params->{vel}// [ $params->{dx}//0, $params->{dy}//0, $params->{dz} // (), ];
+    $self->{mass}           = $params->{mass}           // 100;
+    $self->{visualRange}    = $params->{visualRange}    // 20;
+    $self->{protectedRange} = $params->{protectedRange} // 8;
+    $self->{turnFactor}     = $params->{turnFactor}     // 1;
+    $self->{tail}           = [];
+    $self->{centeringFactor} = 0.04;
+    $self->{matchingFactor}  = 0.05;
+    $self->{avoidFactor}     = 0.02;
+    $self->{maxSpeed}        = 3;
+    $self->{minSpeed}        = 1;
+    $self->{allo}            = "default";
+    $self->{xeno}            = {};
+    bless $self, $class;
+    $self->resetCounts();
+    return $self;
 }
 
-sub resetCounts{
-   my $self=shift;
-   $self->{accumPos}=[(0) x @{$self->{pos}}];
-   $self->{accumVel}=[(0) x @{$self->{pos}}];
-   $self->{close}=[(0) x @{$self->{pos}}];
-   $self->{neighbours}=0;
-	
+# reset accummulators using them;
+sub resetCounts {
+    my $self = shift;
+    $self->{accumPos} = [ (0) x @{ $self->{pos} } ];
+    $self->{accumVel} = [ (0) x @{ $self->{pos} } ];
+    $self->{close}    = [ (0) x @{ $self->{pos} } ];
+    $self->{neighbours} = 0;
 }
 
-sub vecAccum{
-	my ($self,$other,$key,$accumKey)=@_;
-	$self->{$accumKey}->[$_]+=$other->{$key}->[$_] foreach (0..$#{$self->{$key}});
-}
-
-sub inVecBounds{
-	my ($self,$key,$universe,$maxKey,$minKey)=@_;
-	my $result=[];
-	$result->[$_]=bounds($self->{$key}->[$_],$universe->{$maxKey}->[$_],$universe->{$minKey}->[$_])  foreach (0..$#{$self->{$key}})
-}
-
-sub bounds{
-	my ($value,$upperBound,$lowerBound)=@_;
-	return $value>$upperBound?1:($value<$lowerBound?-1:0);
+# accumulate positions and velocities in respective stores
+# if $delta is true, the accumulate differences
+sub vecAccum {
+    my ( $self, $other, $key, $accumKey, $delta ) = @_;
+    $self->{$accumKey}->[$_] += $other->{$key}->[$_] foreach ( 0 .. $#{ $self->{$key} } );
+    if ($delta) {
+       $self->{$accumKey}->[$_] -= $self->{$key}->[$_] foreach ( 0 .. $#{ $self->{$key} } );
+    }
 }
 
 sub update{
    my ($self,$world)=@_;
-	## Add the centering/matching contributions to velocity
-	
-	$world->unplot($self->{pos});
-   if ($self->{neighbours}){
-	   
+   $world->unplot($self->{pos}) unless $self->{pos}->[0]<0;
+   if ($self->{neighbours}){  # neighbours are counted and acummulators populated in pass1();
 	   $self->{vel}=Vec::Sum($self->{vel},
-	                Vec::Mul( Vec::Sub(Vec::Div( $self->{accumPos},$self->{neighbours}),$self->{pos}) , $self->{centeringFactor}),
-	                Vec::Mul( Vec::Sub(Vec::Div( $self->{accumVel},$self->{neighbours}),$self->{vel}) , $self->{matchingFactor}),	                
-	                Vec::Mul( $self->{close}, $self->{avoidFactor})
-	                )
+	        # accumulated position of neighbours are multiplied by **Centering Factor**
+			Vec::Mul( Vec::Sub(Vec::Div( $self->{accumPos},$self->{neighbours}),$self->{pos}) , $self->{centeringFactor}),
+	        # accumulated Velocities of neighbours are multiplied by **Matching Factor**
+			Vec::Mul( Vec::Sub(Vec::Div( $self->{accumVel},$self->{neighbours}),$self->{vel}) , $self->{matchingFactor}),	
+		)
 	}
+	if ($self->{close}->[0]){
+		# Boids within protected range have their accumulated position /deltas/  multiplied witb avodance factor 
+		$self->{vel}=Vec::Add($self->{vel}, Vec::Mul( $self->{close}, $self->{avoidFactor}));
+	}
+	
+	# once in the boundary zome between margin annd edge of universe, a turning factor
+	# makes the boid stay in it universe;  this turn factor line allows 2 or 3 dimensions 
+	# (or more) to be handled
 	$self->{vel}=Vec::Add( $self->{vel},  [map{  $self->{pos}->[$_]>($world->{bounds}->{max}->[$_]-$world->{margin})?-$self->{turnFactor}:
-					    ($self->{pos}->[$_]<($world->{bounds}->{min}->[$_]+$world->{margin})?$self->{turnFactor}:0) }(0..$#{$self->{pos}})]
+					    ($self->{pos}->[$_]<($world->{bounds}->{min}->[$_]+$world->{margin})?$self->{turnFactor}+2:0) }(0..$#{$self->{pos}})]
 					    );
+	
+	# ensure speed is not too excessive or two little				    
+	my $speed=Vec::Scalar($self->{vel});
+	if (abs $speed<0.01){
+		 $self->{vel}=[(.5) x @{$self->{vel}}]
+	}
+	elsif ($speed<$self->{minSpeed}){
+		Vec::Mul( $self->{vel},$self->{minSpeed}/$speed)
+	}
+	elsif($speed>$self->{maxSpeed}){
+		Vec::Mul( $self->{vel},$self->{maxSpeed}/$speed)
+	}
+	
+	#  not update the positions
 	$self->{pos}=Vec::Add($self->{pos},$self->{vel});
 	$self->resetCounts();
-	$world->plot($self->{pos});
+	$world->plot($self->{pos}) unless $self->{pos}->[0]<0;
 
 }
 
-sub closeBy{
-	my ($self,$boid2,$range)=@_;
-	my $toofar=0;
-	foreach (0..$#{$self->{pos}}){
-		return 0 if abs ($self->{pos}->[$_]-$boid2->{pos}->[$_])>$self->{visualRange};
-	}
-	my $distance=Vec::Scalar(Vec::Sub($self->{pos},$boid2->{pos}));
-	return $distance<$self->{visualRange}?int $distance:0;
+sub closeBy {
+    my ( $self, $boid2, $range ) = @_;
+    my $toofar = 0;
+    foreach ( 0 .. $#{ $self->{pos} } ) {
+        return 0if abs( $self->{pos}->[$_] - $boid2->{pos}->[$_] ) >  $self->{visualRange};
+    }
+    my $distance = Vec::Scalar( Vec::Sub( $self->{pos}, $boid2->{pos} ) );
+    return $distance < $self->{visualRange} ? int $distance : 0;
 }
 
 
-__END__
-## For every boid . . .
-#for each boid (boid):
-   my $tmp={};
-    ## Zero all accumulator variables (can't do this in one line in C)
-    $tmp->{neighboring_boids}=[];
-	$tmp->{$_}=0 foreach(qw/xpos_avg ypos_avg xvel_avg yvel_avg close_dx close_dy/);
-    $tmp->{dx}=$boidA->{x}-$boidB->{x};
-    $tmp->{dy}=$boidA->{y}-$boidB->{y};
-    if (abs($tmp->{dx})<$visual_range and abs($tmp->{dx})<$visual_range){## Are both those differences less than the visual range?
-		$tmp->{squaredDistance}=$tmp->{dx}*$tmp->{dx}+$tmp->{dy}*$tmp->{dy};            ## If so, calculate the squared distance
-		if ($tmp->{squaredDistance} < $protected_range_squared){  # Is squared distance less than the protected range?
-                $tmp->{close_dx} += $tmp->{dx};    #     If so, calculate difference in x/y-coordinates to nearfield boid
-                $tmp->{close_dy} += $tmp->{dy};
-		}
-		elsif($tmp->{squaredDistance} < $visual_range*$visual_range){            ## If not in protected range, is the boid in the visual range?
-			$tmp->{xpos_avg}+=$boidB->{x};
-			$tmp->{ypos_avg}+=$boidB->{y};
-			$tmp->{xvel_avg}+=$boidB->{vx};
-			$tmp->{yvel_avg}+=$boidB->{vy};
-			push @{$tmp->{neighboring_boids}},$boidB;
-		}
-	}
-	          
-    if (@{$tmp->{neighboring_boids}} > 0){   ## If there were any boids in the visual range . .
-		my $cnt=@{$tmp->{neighboring_boids}};
-		$tmp->{xpos_avg}/=$cnt; ## Divide accumulator variables by number of boids in visual range
-		$tmp->{ypos_avg}/=$cnt;
-		$tmp->{xvel_avg}/=$cnt;
-		$tmp->{yvel_avg}/=$cnt;
-	}
-	
-	## Add the centering/matching contributions to velocity
-	$boidA->{vx}+=($tmp->{xpos_avg}-$boidA->{x})*$centering_factor +
-	               $tmp->{xvel_avg}-$boidA->{vx}*$matching_factor
-	               $close_dx*$avoidFactor +
-	               ($boidA->{x}<$leftMargin?$turnFactor:($boidA->{y}>$rightMargin?-$turnFactor:0));
-	$boidA->{vy}+=($tmp->{ypos_avg}-$boidA->{y})*$centering_factor +
-	               $tmp->{yvel_avg}-$boidA->{vx}*$matching_factor  +
-	               $close_dy*$avoidFactor
-	               ($boidA->{y}<$topMargin?$turnFactor:($boidA->{y}>$bottomMargin?-$turnFactor:0));
-	               
-    ## Calculate the boid's speed	               
-	$boid->{speed}=sqrt($boidA->{vx}*$boidA->{vx}+$boidA->{vy}*$boidA->{vy});
+package Vec;
+# Simple vector maths package that allows 2 or 3 (or more)
+# dimension vectores to be handled. 
 
-	if ($boidA->{speed}<$minSpeed){
-        $boidA->{vx} = $boidA->{vx}*$minSpeed/$boidA->{speed};
-        $boidA->{vy} = $boidA->{vy}*$minSpeed/$boidA->{speed};
-	}
-	elsif ($boidA->{speed}>$maxSpeed){
-        $boidA->{vx} = $boidA->{vx}*$maxSpeed/$boidA->{speed};
-        $boidA->{vy} = $boidA->{vy}*$maxSpeed/$boidA->{speed};
-	}
+sub Add {
+    my ( $vecA, $vecB ) = @_;
+    return [ map { $vecA->[$_] + $vecB->[$_] } ( 0 .. $#$vecA ) ];
+}
 
-    $boidA->{x} += $boid->{vx};
-    $boidA->{y} += $boid->{vy};
+sub Sub {
+    my ( $vecA, $vecB ) = @_;
+    return [ map { $vecA->[$_] - $vecB->[$_] } ( 0 .. $#$vecA ) ];
+}
 
-    ###############################################################
-    #### ECE 5730 students only - dynamically update bias value ###
-    ###############################################################
-    ## biased to right of screen
-    #if (boid in scout group 1): 
-        #if (boid.vx > 0):
-            #boid.biasval = min(maxbias, boid.biasval + bias_increment)
-        #else:
-            #boid.biasval = max(bias_increment, boid.biasval - bias_increment)
-    ## biased to left of screen
-    #else if (boid in scout group 2): # biased to left of screen
-        #if (boid.vx < 0):
-            #boid.biasval = min(maxbias, boid.biasval + bias_increment)
-        #else:
-            #boid.biasval = max(bias_increment, boid.biasval - bias_increment)
-    ###############################################################
+sub Sum {
+    my $sum = [];
+    foreach my $vec (@_) {
+        foreach ( 0 .. $#$vec ) {
+            $sum->[$_] //= 0;
+            $sum->[$_] += $vec->[$_];
+        }
+    }
+    return $sum;
+}
 
-    ## If the boid has a bias, bias it!
-    ## biased to right of screen
-    #if (boid in scout group 1):
-        #boid.vx = (1 - boid.biasval)*boid.vx + (boid.biasval * 1)
-    ## biased to left of screen
-    #else if (boid in scout group 2):
-        #boid.vx = (1 - boid.biasval)*boid.vx + (boid.biasval * (-1))
+sub Mul {
+    my ( $vec, $scale ) = @_;
+    return [ map { $vec->[$_] * $scale } ( 0 .. $#$vec ) ];
+}
 
-    ## Calculate the boid's speed
-    ## Slow step! Lookup the "alpha max plus beta min" algorithm
-    #speed = sqrt(boid.vx*boid.vx + boid.vy*boid.vy)
+sub Div {
+    my ( $vec, $scale ) = @_;
+    return [ map { $vec->[$_] / $scale } ( 0 .. $#$vec ) ];
+}
 
-    ## Update boid's position
-    #boid.x = boid.x + boid.vx
-    #boid.y = boid.y + boid.vyV
+sub Rand {
+    my ( $max, $min ) = @_;
+    $min //= [ (0) x @$max ];
+    return [ map { int( rand() * ( $max->[$_] - $min->[$_] ) + $min->[$_] ) }
+          ( 0 .. $#$max ) ];
+}
+
+sub Scalar {
+    my ($vector) = @_;
+    my $sumSquare = 0;
+    $sumSquare += $vector->[$_] * $vector->[$_] foreach ( 0 .. $#$vector );
+    return sqrt $sumSquare;
+}
+
+sub Print {
+    my ($vector) = @_;
+    die caller unless ref $vector eq "ARRAY";
+    print Vec::toString($vector), "\n";
+}
+
+sub toString {
+    my ($vector) = @_;
+    die caller unless ref $vector eq "ARRAY";
+    return "[" . join( ",", map { sprintf( "%.2f", $_ ) } @$vector ) . "]";
+}
