@@ -5,16 +5,18 @@ binmode( STDOUT, ":encoding(UTF-8)" );
 #https://vanhunteradams.com/Pico/Animal_Movement/Boids-algorithm.html
 
 #  Create a world
-my $world =  new BoidWorld( { maxX => 200, maxY => 130, minX => 10, minY => 10, } );
+my $world =  new BoidWorld( { maxX => 200, maxY => 130, minX => 0, minY => 0, } );
+
+my $time=time();my $cycles=300; my $number=200;
 
 # populate with random entities;
-$world->randEntity() foreach ( 0 .. 200 ) ; 
-
+$world->randEntity() foreach ( 0 .. $number ) ; 
 # watch them fly;
-for ( 1 .. 3000 ) {
-    $world->process();
-    $world->draw( 10, 10, 130, 200 );
+for ( 1 .. 300 ) {
+   $world->process();
+   $world->draw( 10, 10, 130, 200 );
 }
+print "\n\nfps for $cycles cycles with $number boids  ", 300/(time()-$time);
 
 package BoidWorld;
 
@@ -34,9 +36,8 @@ sub new {
     # print "Max bounds:-", join( ",", @{ $self->{bounds}->{max} } ), "\n";
     #  print "Min bounds:-", join( ",", @{ $self->{bounds}->{min} } ), "\n";
     $self->{grid} = [];
-
-    foreach ( 0 .. $self->{height} ) {
-        vec( $self->{grid}[$_], $self->{width}, 1 ) = 0;
+    foreach ( 0 .. $self->{height}+4 ) {
+        vec( $self->{grid}[$_], $self->{width}+4, 1 ) = 0;
     }
     
     # all interacting entitities, boids, future obstacles, e.g.
@@ -91,13 +92,13 @@ sub plot {
 
 sub point {
     my ( $self, $vec ) = @_;
-    return if outOfBounds($vec);
+  #  return if outOfBounds($vec);
     return vec( $self->{grid}->[ $vec->[1] ], $vec->[0], 1 );
 }
 
 sub unplot {
     my ( $self, $vec ) = @_;
-    return if outOfBounds($vec);
+  #  return if outOfBounds($vec);
     vec( $self->{grid}->[ $vec->[1] ], $vec->[0], 1 ) = 0;
 }
 
@@ -159,14 +160,14 @@ sub new {
     $self->{pos} = $params->{position} // $params->{pos}// [ $params->{x} //0, $params->{y} //0, $params->{z}  // (), ];
     $self->{vel} = $params->{velocity} // $params->{vel}// [ $params->{dx}//0, $params->{dy}//0, $params->{dz} // (), ];
     $self->{mass}           = $params->{mass}           // 100;
-    $self->{visualRange}    = $params->{visualRange}    // 20;
+    $self->{visualRange}    = $params->{visualRange}    // 40;
     $self->{protectedRange} = $params->{protectedRange} // 8;
-    $self->{turnFactor}     = $params->{turnFactor}     // 1;
+    $self->{turnFactor}     = $params->{turnFactor}     // .2;
     $self->{tail}           = [];
-    $self->{centeringFactor} = 0.04;
+    $self->{centeringFactor} = 0.00005;
     $self->{matchingFactor}  = 0.05;
-    $self->{avoidFactor}     = 0.02;
-    $self->{maxSpeed}        = 3;
+    $self->{avoidFactor}     = 0.05;
+    $self->{maxSpeed}        = 6;
     $self->{minSpeed}        = 1;
     $self->{allo}            = "default";
     $self->{xeno}            = {};
@@ -199,9 +200,9 @@ sub update{
    $world->unplot($self->{pos}) unless $self->{pos}->[0]<0;
    if ($self->{neighbours}){  # neighbours are counted and acummulators populated in pass1();
 	   $self->{vel}=Vec::Sum($self->{vel},
-	        # accumulated position of neighbours are multiplied by **Centering Factor**
+	        # average accumulated position of neighbours are multiplied by **Centering Factor**
 			Vec::Mul( Vec::Sub(Vec::Div( $self->{accumPos},$self->{neighbours}),$self->{pos}) , $self->{centeringFactor}),
-	        # accumulated Velocities of neighbours are multiplied by **Matching Factor**
+	        # average accumulated Velocities of neighbours are multiplied by **Matching Factor**
 			Vec::Mul( Vec::Sub(Vec::Div( $self->{accumVel},$self->{neighbours}),$self->{vel}) , $self->{matchingFactor}),	
 		)
 	}
@@ -249,7 +250,7 @@ sub closeBy {
 
 package Vec;
 # Simple vector maths package that allows 2 or 3 (or more)
-# dimension vectores to be handled. 
+# dimension vectors to be handled. 
 
 sub Add {
     my ( $vecA, $vecB ) = @_;
