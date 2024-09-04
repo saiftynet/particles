@@ -5,18 +5,27 @@ binmode( STDOUT, ":encoding(UTF-8)" );
 #https://vanhunteradams.com/Pico/Animal_Movement/Boids-algorithm.html
 
 #  Create a world
-my $world =  new BoidWorld( { maxX => 200, maxY => 130, minX => 0, minY => 0, } );
-
-my $time=time();my $cycles=300; my $number=200;
+my $world =  new BoidWorld( { maxX => 200, maxY => 140, minX => 0, minY => 0, } );
+my $starling={ visualRange    => 20,        protectedRange => 8,
+	           centeringFactor=> 0.0005,    matchingFactor =>  0.05,     avoidFactor    =>  0.1,
+               maxSpeed       => 5,         minSpeed       => 2,
+               species        => "starling",mass=> 100,
+               tailLength     => 4,
+			};
+my $time=time();my $cycles=1000; my $number=200;
 
 # populate with random entities;
-$world->randEntity() foreach ( 0 .. $number ) ; 
+$world->randEntity($starling) foreach ( 0 .. $number ) ; 
 # watch them fly;
 for ( 1 .. 300 ) {
    $world->process();
    $world->draw( 10, 10, 130, 200 );
 }
-print "\n\nfps for $cycles cycles with $number boids  ", 300/(time()-$time);
+print "\n\nfps for $cycles cycles with $number boids  ", $cycles/(time()-$time);
+
+
+
+# Package that defines the world in which the 
 
 package BoidWorld;
 
@@ -34,17 +43,20 @@ sub new {
     $self->{dim}    = scalar @{ $self->{bounds}->{max} };  # number of dimensions of this world
     $self->{margin} = 20;
     # print "Max bounds:-", join( ",", @{ $self->{bounds}->{max} } ), "\n";
-    #  print "Min bounds:-", join( ",", @{ $self->{bounds}->{min} } ), "\n";
-    $self->{grid} = [];
-    foreach ( 0 .. $self->{height}+4 ) {
-        vec( $self->{grid}[$_], $self->{width}+4, 1 ) = 0;
-    }
-    
+    # print "Min bounds:-", join( ",", @{ $self->{bounds}->{min} } ), "\n";
     # all interacting entitities, boids, future obstacles, e.g.
     # predators/preys are stored in {entities};
     
     $self->{entities} = [];
     bless $self, $class;
+    $self->clear();
+    return $self;
+}
+
+sub clear{
+	my $self=shift;
+	my $temp;vec( $temp, $self->{width}+4, 1 ) = 0;
+    $self->{grid} = [($temp) x ($self->{height}+4) ];
 }
 
 sub insert {
@@ -65,7 +77,10 @@ sub draw {
 
     system($^O eq 'MSWin32'?'cls':'clear');
     #print "\e[2J\ec";
+   # print "\e[?25l"; 
     print join( "\n", @block );
+   # print "\e[0H\e[0J\e[?25h";
+    
 }
 
 # the magic that converts a bit vector array into braille characters
@@ -112,10 +127,10 @@ sub outOfBounds {
 }
 
 sub randEntity { # create random boids
-    my ($self) = @_;
-    my $pos = Vec::Rand( $self->{bounds}->{max}, $self->{bounds}->{min} );
-    my $vel = Vec::Rand( [ (3) x $self->{dim} ], [ (-3) x $self->{dim} ] );
-    $self->insert( Boid->new( { pos => $pos, vel => $vel } ) );
+    my ($self,$params) = @_;
+    $params->{pos} = Vec::Rand( $self->{bounds}->{max}, $self->{bounds}->{min} );
+    $params->{vel} = Vec::Rand( [ (3) x $self->{dim} ], [ (-3) x $self->{dim} ] );
+    $self->insert( Boid->new( $params ) );
 }
 
 sub process {
@@ -123,23 +138,24 @@ sub process {
     # two loops means that the pairs are not repeated 
     foreach my $ind1 ( 0 .. $#{ $self->{entities} } ) {
         foreach my $ind2 ( $ind1 + 1 .. $#{ $self->{entities} } ) {
+			my ($boidA,$boidB)=($self->{entities}->[$ind1],$self->{entities}->[$ind2]);
 			# are boids near enough to affect each other?
-            my $proximity = ( ( $self->{entities}->[$ind1] )->closeBy( $self->{entities}->[$ind2] ) );
+            my $proximity = ( ( $boidA )->closeBy( $boidB ) );
             next unless $proximity;  # not close enough..get next pair;
-            if ( $proximity < $self->{entities}->[$ind1]->{protectedRange} ) {
+            if ( $proximity < $boidA->{protectedRange} ) {
 				# too close...add their **deltas** to {close};
-                $self->{entities}->[$ind1]->vecAccum( $self->{entities}->[$ind2], "pos", "close", 1 );
-                $self->{entities}->[$ind2]->vecAccum( $self->{entities}->[$ind1], "pos", "close", 1 );
+                $boidA->vecAccum( $boidB, "pos", "close", 1 );
+                $boidB->vecAccum( $boidA, "pos", "close", 1 );
             }
             else {
 				# within visual range but not in protected area, accumulate position and velocity vectors
-                $self->{entities}->[$ind1]->vecAccum( $self->{entities}->[$ind2], "pos", "accumPos" );
-                $self->{entities}->[$ind1]->vecAccum( $self->{entities}->[$ind2], "vel", "accumVel" );
-                $self->{entities}->[$ind2]->vecAccum( $self->{entities}->[$ind1], "pos", "accumPos" );
-                $self->{entities}->[$ind2]->vecAccum( $self->{entities}->[$ind1], "vel", "accumVel" );
+                $boidA->vecAccum( $boidB, "pos", "accumPos" );
+                $boidA->vecAccum( $boidB, "vel", "accumVel" );
+                $boidB->vecAccum( $boidA, "pos", "accumPos" );
+                $boidB->vecAccum( $boidA, "vel", "accumVel" );
                 # neighbours incremented;
-                $self->{entities}->[$ind1]->{neighbours}++;
-                $self->{entities}->[$ind2]->{neighbours}++;
+                $boidA->{neighbours}++;
+                $boidB->{neighbours}++;
             }
 
         }
@@ -159,18 +175,20 @@ sub new {
     my $self = {};
     $self->{pos} = $params->{position} // $params->{pos}// [ $params->{x} //0, $params->{y} //0, $params->{z}  // (), ];
     $self->{vel} = $params->{velocity} // $params->{vel}// [ $params->{dx}//0, $params->{dy}//0, $params->{dz} // (), ];
-    $self->{mass}           = $params->{mass}           // 100;
-    $self->{visualRange}    = $params->{visualRange}    // 40;
-    $self->{protectedRange} = $params->{protectedRange} // 8;
-    $self->{turnFactor}     = $params->{turnFactor}     // .2;
-    $self->{tail}           = [];
-    $self->{centeringFactor} = 0.00005;
-    $self->{matchingFactor}  = 0.05;
-    $self->{avoidFactor}     = 0.05;
-    $self->{maxSpeed}        = 6;
-    $self->{minSpeed}        = 1;
-    $self->{allo}            = "default";
-    $self->{xeno}            = {};
+   # die Vec::Print($self->{pos});
+    my $default={ mass           => 100,
+                  visualRange    => 20,
+                  protectedRange => 10,
+                  centeringFactor=> 0.0005,
+                  matchingFactor =>  0.05,
+                  avoidFactor    =>  0.05,
+                  turnFactor     => .5,
+                  maxSpeed       => 6,
+                  minSpeed       => 2,
+                  species        => "starling",
+			  };
+	$self->{$_}=$params->{$_}//$default->{$_} foreach (keys %$default);
+	$self->{tail}            = [([ (0) x @{ $self->{pos} } ]) x ($params->{tailLength}||4)];
     bless $self, $class;
     $self->resetCounts();
     return $self;
@@ -197,7 +215,8 @@ sub vecAccum {
 
 sub update{
    my ($self,$world)=@_;
-   $world->unplot($self->{pos}) unless $self->{pos}->[0]<0;
+   my $old=shift @{$self->{tail}};
+   $world->unplot($old) unless $old->[0]<0;
    if ($self->{neighbours}){  # neighbours are counted and acummulators populated in pass1();
 	   $self->{vel}=Vec::Sum($self->{vel},
 	        # average accumulated position of neighbours are multiplied by **Centering Factor**
@@ -233,6 +252,7 @@ sub update{
 	#  not update the positions
 	$self->{pos}=Vec::Add($self->{pos},$self->{vel});
 	$self->resetCounts();
+	push @{$self->{tail}},$self->{pos};
 	$world->plot($self->{pos}) unless $self->{pos}->[0]<0;
 
 }
@@ -252,17 +272,17 @@ package Vec;
 # Simple vector maths package that allows 2 or 3 (or more)
 # dimension vectors to be handled. 
 
-sub Add {
+sub Add { # add two vectors
     my ( $vecA, $vecB ) = @_;
     return [ map { $vecA->[$_] + $vecB->[$_] } ( 0 .. $#$vecA ) ];
 }
 
-sub Sub {
+sub Sub { # subtract two vectors
     my ( $vecA, $vecB ) = @_;
     return [ map { $vecA->[$_] - $vecB->[$_] } ( 0 .. $#$vecA ) ];
 }
 
-sub Sum {
+sub Sum {  # sum multiple vectors
     my $sum = [];
     foreach my $vec (@_) {
         foreach ( 0 .. $#$vec ) {
@@ -273,37 +293,37 @@ sub Sum {
     return $sum;
 }
 
-sub Mul {
+sub Mul {  # multiple vector by scalar
     my ( $vec, $scale ) = @_;
     return [ map { $vec->[$_] * $scale } ( 0 .. $#$vec ) ];
 }
 
-sub Div {
+sub Div {  # divide vector by a scalar
     my ( $vec, $scale ) = @_;
     return [ map { $vec->[$_] / $scale } ( 0 .. $#$vec ) ];
 }
 
-sub Rand {
+sub Rand { # give maximaun and minimum bounds, gnerate a random vector within those bounds
     my ( $max, $min ) = @_;
     $min //= [ (0) x @$max ];
     return [ map { int( rand() * ( $max->[$_] - $min->[$_] ) + $min->[$_] ) }
           ( 0 .. $#$max ) ];
 }
 
-sub Scalar {
+sub Scalar { # get scalar magnitude of vector 
     my ($vector) = @_;
     my $sumSquare = 0;
     $sumSquare += $vector->[$_] * $vector->[$_] foreach ( 0 .. $#$vector );
     return sqrt $sumSquare;
 }
 
-sub Print {
+sub Print {  # debug thing to print a vector
     my ($vector) = @_;
-    die caller unless ref $vector eq "ARRAY";
+    die "not a Vec at ".caller unless ref $vector eq "ARRAY";
     print Vec::toString($vector), "\n";
 }
 
-sub toString {
+sub toString {  # debug thing to covert Vec into a string that evaluates to Array Ref.
     my ($vector) = @_;
     die caller unless ref $vector eq "ARRAY";
     return "[" . join( ",", map { sprintf( "%.2f", $_ ) } @$vector ) . "]";
