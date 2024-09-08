@@ -17,7 +17,7 @@ my $time=time();my $cycles=1000; my $number=200;
 # populate with random entities;
 $world->randEntity($starling) foreach ( 0 .. $number ) ; 
 # watch them fly;
-for ( 1 .. 300 ) {
+for ( 1 .. $cycles ) {
    $world->process();
    $world->draw( 10, 10, 130, 200 );
 }
