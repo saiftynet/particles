@@ -37,7 +37,8 @@ Pure Perl terminal based simulations simulations for particle motion, cellular a
 
 ## Other image Manipulations
 
-[globe.webm](https://github.com/user-attachments/assets/b06db22e-a592-4fca-9f6a-2bbd7df827a3)
+![globe](https://github.com/user-attachments/assets/5a8775ed-88ca-453b-a29f-d03708ce5e09)
+
 
 Usage:  perl globe.pl <size, optional 100 is reasonable>  <number_of_Pixels_shifted about 1-10 is reasonable>
 ("mercator bw2.png" should be in the same directory)
