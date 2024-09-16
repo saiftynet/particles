@@ -1,3 +1,12 @@
+#!/usr/env perl
+#################################################################################
+###                            globe.pl                                       ###
+#  Requirements Image::Magick, and a bw (1-bit) image to wrap into a sphere     #
+#  Usage: perl globe.pl                                                         #
+#         perl globe.pl 50                                                      #
+#         perl globe.pl 85 -5                                                   #     
+#################################################################################   
+ 
 use strict;use warnings;
 binmode( STDOUT, ":encoding(UTF-8)" );
 use strict; use warnings;
@@ -5,25 +14,22 @@ use Time::HiRes qw/sleep/;
 use Image::Magick;
 my $pi=4*atan2(1,1);
 
-my $start="10110011110000110001";
-my $testBulge=pack("b*",$start);
-my $out=bulgeBv($testBulge,[1,2,3]);
-#die  unpack("b*",$out);
+# the image dimensions (to decide the height of image) pixel height is 4*character height;
+# pixel width is is 2*character  width (braille characters are 2x4 dots)
 
-
-# the console dimensions (to decide the height of image) is 4*character height;
-# $consolewidth is 2*column width of the terminal window
 my ($consoleHeight,$speed)=@ARGV;
 $consoleHeight||=80;
 my $consoleWidth=$consoleHeight<100?124:$consoleHeight+50;
 $speed//=10;
-print "\e[?25l";
+
+
+print "\e[?25l"; # suppress blinking cursor
 # load image into a bit vector array of predefined dimensions
+
 my $picture=imageToBVArray("mercator bw2.png",[$consoleWidth*3,$consoleHeight]);
 
-# transform image into a globe
-# wrap-around-scroll the image
-# and repeat
+# transform image into a globe (half of image taken and each raster shrunk to fit latitude)
+# draw, pause, wrap-around-scroll the image and repeat
 for(0..180){
 	draw(globe($picture));
 	sleep 0.05;
@@ -31,7 +37,7 @@ for(0..180){
 		$picture->[$row]=scrollBv($picture->[$row],$speed);
 	}
 }
-print "\n\n\e[?25h";
+print "\n\n\e[?25h"; #reenable blinking cursor
 
 # create a bitvector arrray
 sub grid{
@@ -164,11 +170,9 @@ sub shrinkBv{
 sub scrollBv{
 	my ($inBv,$displacement)=@_;
 	return $inBv unless $displacement;
+	#die $displacement;
 	my $start= unpack("b*",$inBv);
-	if ($displacement<0){
-		return pack ("b*",substr($start,$displacement,length ($start)-$displacement).substr($start,0,$displacement));
-	}
-	return pack ("b*",substr($start,-$displacement,$displacement).substr($start,0,(length $start)-$displacement))
+	return($displacement<0)?pack ("b*",substr($start.$start ,-$displacement,length $start)):pack ("b*",substr($start.$start,-$displacement+length $start,length $start))
 }
 
 # given a image, extract the first half (representing a hemisphere)
